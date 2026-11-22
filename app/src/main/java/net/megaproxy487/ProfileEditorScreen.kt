@@ -47,7 +47,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.Box
@@ -64,6 +63,8 @@ import net.megaproxy487.data.readPrivateKeyText
 import net.megaproxy487.model.DnsTransport
 import net.megaproxy487.model.DnsProvider
 import net.megaproxy487.model.ProfileColorMatcher
+import net.megaproxy487.model.KeyPassphrase
+import net.megaproxy487.model.protectedSshKey
 import net.megaproxy487.model.ProxyConfig
 import net.megaproxy487.model.ProxyType
 import net.megaproxy487.model.TlsProfile
@@ -178,7 +179,7 @@ internal fun ProfileEditorScreen(activity: Activity, profileId: String?, onBack:
         config = updated
         profile = profile.copy(config = updated)
         saveProfile(affectsConnection = affectsConnection)
-        error = globalSettings.applyTo(updated).connectionValidationError()?.let { activity.uiText(it) }
+        error = globalSettings.applyTo(updated).profileValidationError()?.let { activity.uiText(it) }
         if (affectsConnection && ProxyVpnService.isRunning && !connectionChangeDeferred && profile.id == editedConnectionProfileId) {
             if (alwaysOnActive) {
                 connectionChangeDeferred = true
@@ -200,7 +201,7 @@ internal fun ProfileEditorScreen(activity: Activity, profileId: String?, onBack:
                 }
             }
             result.onSuccess { imported ->
-                updateConfig(if (jump) config.copy(jumpPrivateKey = imported, unreadableSecrets = config.unreadableSecrets - "jumpPrivateKey") else config.copy(privateKey = imported, unreadableSecrets = config.unreadableSecrets - "privateKey"))
+                updateConfig(config.withSshKey(imported, jump))
                 error = null
             }.onFailure { failure ->
                 error = failure.userMessage(activity, R.string.key_import_failed)
@@ -215,10 +216,11 @@ internal fun ProfileEditorScreen(activity: Activity, profileId: String?, onBack:
         uri?.let { importPrivateKey(it, jump = true) }
     }
 
-    val validationRes = globalSettings.applyTo(config).connectionValidationError()
+    val validationRes = globalSettings.applyTo(config).profileValidationError()
     fun fieldError(vararg ids: Int): String? = validationRes?.takeIf { it in ids }?.let { activity.uiText(it) }
     val validPorts = validIntegerInput(portText, 1..65535) != null &&
         (!config.type.hasJump || validIntegerInput(jumpPortText, 1..65535) != null)
+    val withUnlockedKeys = sshConnectionPrompt(store) { error = activity.uiText(R.string.ssh_unlock_profile_changed) }
     val canReconnect = validationRes == null && validPorts && writeStatus.pending == 0 && !writeStatus.failed
 
     val compactKeyboard = LocalCompactKeyboard.current
@@ -240,8 +242,10 @@ internal fun ProfileEditorScreen(activity: Activity, profileId: String?, onBack:
                     Text(stringResource(R.string.next_connection))
                 }
                 if (!showAlwaysOnNotice) TextButton(shape = RoundedCornerShape(12.dp), enabled = canReconnect, onClick = {
-                    showReconnectPrompt = false; connectionChangeDeferred = true
-                    ProxyVpnService.reconnect(activity)
+                    withUnlockedKeys(profile.copy(config = globalSettings.applyTo(config))) {
+                        showReconnectPrompt = false; connectionChangeDeferred = true
+                        ProxyVpnService.reconnect(activity)
+                    }
                 }) { Text(stringResource(R.string.reconnect_now)) }
             }
         }
@@ -393,7 +397,7 @@ internal fun ProfileEditorScreen(activity: Activity, profileId: String?, onBack:
 
                 if (config.type.isSsh) {
                   item {
-                    OutlinedTextField(config.privateKey, { value -> acceptText(value, 64 * 1024) { updateConfig(config.copy(privateKey = it, unreadableSecrets = config.unreadableSecrets - "privateKey")) } }, label = { FieldLabel(stringResource(R.string.private_key_optional)) }, supportingText = { Text(stringResource(R.string.private_key_format_hint)) }, minLines = 3, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth().revealOnKeyboard())
+                    OutlinedTextField(config.privateKey, { value -> acceptText(value, 64 * 1024) { updateConfig(config.withSshKey(it, jump = false)) } }, label = { FieldLabel(stringResource(R.string.private_key_optional)) }, supportingText = { Text(stringResource(R.string.private_key_format_hint)) }, minLines = 3, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth().revealOnKeyboard())
                   }
                   item {
                     OutlinedButton(shape = RoundedCornerShape(12.dp),
@@ -401,6 +405,13 @@ internal fun ProfileEditorScreen(activity: Activity, profileId: String?, onBack:
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text(stringResource(R.string.import_destination_key)) }
                   }
+                    if (protectedSshKey(config.privateKey) || "privateKeyPassphrase" in config.unreadableSecrets) item {
+                        androidx.compose.runtime.key(config.privateKey) {
+                            KeyPassphraseField(config.privateKeyPassphrase) { phrase ->
+                                updateConfig(config.copy(privateKeyPassphrase = phrase, unreadableSecrets = config.unreadableSecrets - "privateKeyPassphrase"))
+                            }
+                        }
+                    }
                     if (config.password.isBlank() && config.privateKey.isBlank()) {
                       item {
                         Text(
@@ -479,13 +490,20 @@ internal fun ProfileEditorScreen(activity: Activity, profileId: String?, onBack:
                         error = fieldError(R.string.validation_jump_basic_password), modifier = Modifier.fillMaxWidth())
                       }
                       item {
-                        OutlinedTextField(config.jumpPrivateKey, { value -> acceptText(value, 64 * 1024) { updateConfig(config.copy(jumpPrivateKey = it, unreadableSecrets = config.unreadableSecrets - "jumpPrivateKey")) } }, label = { FieldLabel(stringResource(R.string.jump_private_key_optional)) }, minLines = 3, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth().revealOnKeyboard())
+                        OutlinedTextField(config.jumpPrivateKey, { value -> acceptText(value, 64 * 1024) { updateConfig(config.withSshKey(it, jump = true)) } }, label = { FieldLabel(stringResource(R.string.jump_private_key_optional)) }, minLines = 3, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth().revealOnKeyboard())
                       }
                       item {
                         OutlinedButton(shape = RoundedCornerShape(12.dp),
                             enabled = !importingKey, onClick = { jumpKeyPicker.launch(arrayOf("*/*")) },
                             modifier = Modifier.fillMaxWidth(),
                         ) { Text(stringResource(R.string.import_jump_key)) }
+                      }
+                      if (protectedSshKey(config.jumpPrivateKey) || "jumpPrivateKeyPassphrase" in config.unreadableSecrets) item {
+                          androidx.compose.runtime.key(config.jumpPrivateKey) {
+                              KeyPassphraseField(config.jumpPrivateKeyPassphrase) { phrase ->
+                                  updateConfig(config.copy(jumpPrivateKeyPassphrase = phrase, unreadableSecrets = config.unreadableSecrets - "jumpPrivateKeyPassphrase"))
+                              }
+                          }
                       }
                         if (config.jumpPassword.isBlank() && config.jumpPrivateKey.isBlank()) {
                           item {
@@ -631,6 +649,14 @@ internal fun ProfileEditorScreen(activity: Activity, profileId: String?, onBack:
             dismissButton = { TextButton(shape = RoundedCornerShape(12.dp), onClick = { unsafeHostKeyHop = null }) { Text(stringResource(R.string.cancel)) } },
         )
     }
+}
+
+@Composable
+private fun KeyPassphraseField(current: KeyPassphrase, update: (KeyPassphrase) -> Unit) {
+    PasswordField(if (current.remember) current.value else "", {
+        if (it.length <= 16_384) update(KeyPassphrase(it, remember = it.isNotEmpty()))
+    }, stringResource(R.string.ssh_optional_phrase), modifier = Modifier.fillMaxWidth())
+    Text(stringResource(R.string.ssh_optional_phrase_detail), style = MaterialTheme.typography.bodySmall)
 }
 
 @Composable
