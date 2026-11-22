@@ -503,7 +503,8 @@ def prepare_emulator(shell, api):
     shell("am", "force-stop", package)
     shell("pm", "disable-user", "--user", "0", package)
 
-    deadline = time.monotonic() + 30
+    # Oreo can finish its next automatic scan after 30 seconds when the boot scan is empty.
+    deadline = time.monotonic() + (90 if api == 26 else 30)
     while True:
         state = shell("dumpsys", "connectivity")
         default = re.search(r"Active default network: (\d+)", state)
@@ -574,6 +575,11 @@ def main():
         "-r",
         str(ROOT / "app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk"),
     )
+    if args.api >= 30:
+        helper = (
+            ROOT / "device-tests/headless/build/outputs/apk/debug/headless-debug.apk"
+        )
+        command(*adb, "install", "-r", str(helper))
     shell("am", "force-stop", PACKAGE)
     if shell("pm", "clear", PACKAGE) != "Success":
         raise RuntimeError("Failed to reset disposable app data")
@@ -605,6 +611,10 @@ def main():
         if args.api >= 29:
             tests.append(
                 ("VpnDeviceTest#strictSourceValidatedTcpUdpStopAndRestart", None)
+            )
+        if args.api >= 30:
+            tests.append(
+                ("VpnDeviceTest#selectedHeadlessPackagePassesSourceValidation", None)
             )
         if args.api >= 33:
             tests.append(("VpnDeviceTest#deniedNotificationsStillAllowVpn", None))
