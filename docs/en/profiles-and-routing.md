@@ -27,7 +27,18 @@ to follow the application's default:
 
 Android also accepts `DEFAULT`. It reads the deprecated `tls.fingerprint` when the Android
 preset is absent. Omitting both preserves the current selection on import and refresh.
-Global `tls.customJa3` and per-profile QUIC JA3 keep their existing locations.
+Android exports the global JA3 as `android.tls.customJa3`. The per-profile QUIC JA3
+remains in `profiles[].tls.customJa3`. The other Android version 1 fields are:
+
+| Section | Fields |
+| --- | --- |
+| `android` | `alwaysOnProfileId` |
+| `android.ssh` | `fingerprint`, `keepaliveSeconds`, `maxChannels`, `rotationMinutes`, `rotationMb` |
+| `android.routing` and `profiles[].android.routing` | `routeAllApps`, `selectedPackages` |
+
+For each field, Android reads its old location when the corresponding Android
+section omits it. An unsupported Android section version is ignored. SSH
+authentication mode, LAN bypass and the diagnostic log size remain shared fields.
 
 ## Server types
 
@@ -129,7 +140,7 @@ force-stop still apply. Use **Settings → Battery settings** if Android restric
 ## Import, export and local controls
 
 Import MegaProxy JSON, ProxyList, FoxyProxy JSON or supported SuperProxy text. Import reports
-ignored browser-only or unknown fields. JSON version 8 preserves stable profile IDs and portable
+ignored browser-only or unknown fields. Android exports JSON version 9 and can import versions 1–9. JSON preserves stable profile IDs and portable
 settings; explicit unsupported transports are rejected. ProxyList exports only standalone
 HTTPS/MASQUE/SOCKS5 endpoints; use JSON for SSH, Jump and other settings.
 
