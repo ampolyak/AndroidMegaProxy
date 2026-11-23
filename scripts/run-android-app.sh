@@ -8,11 +8,24 @@ if [[ -f "$HOME/.zshrc.extra" ]]; then
     source "$HOME/.zshrc.extra"
 fi
 
+if [[ -z "${ANDROID_NDK_HOME:-}" ]]; then
+    ndk_version=29.0.14206865
+    export ANDROID_NDK_HOME="${ANDROID_HOME:?ANDROID_HOME must point to the Android SDK}/ndk/$ndk_version"
+    if [[ ! -f "$ANDROID_NDK_HOME/meta/platforms.json" ]]; then
+        "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" "ndk;$ndk_version"
+    fi
+fi
+if [[ ! -f "$ANDROID_NDK_HOME/meta/platforms.json" ]]; then
+    echo "Android NDK is incomplete: $ANDROID_NDK_HOME/meta/platforms.json is missing" >&2
+    exit 1
+fi
+
 "$project_dir/scripts/start-android-emulator.sh"
 
 (
     cd "$project_dir"
-    uv run manage.py android debug
+    # gomobile builds generated bindings outside the checkout. The APK records the project commit.
+    GOFLAGS="${GOFLAGS:+$GOFLAGS }-buildvcs=false" uv run manage.py android debug
 )
 
 adb -e install -r "$project_dir/app/build/outputs/apk/debug/app-debug.apk"
