@@ -1,0 +1,4 @@
+- Added passphrase-protected SSH keys for destination and jump hosts, with prompts or optional local passphrase saving.
+- Added a VPN apps shortcut below the active profile.
+- On Android 10+, split tunneling now defaults to Standard ownership checks unless an on/off choice is already saved.
+- Configuration exports now use JSON v9 with Android-specific settings in an Android section.
